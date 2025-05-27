@@ -1,0 +1,15 @@
+# 오디오 처리
+librosa
+numpy
+soundfile
+
+# AI 모델 및 추론
+torch
+torchaudio
+transformers
+
+
+# 유틸리티
+python-dotenv
+pydantic
+loguru
