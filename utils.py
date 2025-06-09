@@ -178,6 +178,7 @@ def calculate_vt_dl(est_tensor):
 
 class AudioDataset(torch.utils.data.Dataset):
     def __init__(self, data_dir:str, csv_dir:str , sample_rate=16000):
+        super(AudioDataset, self).__init__()
         self.data_dir = data_dir
         self.csv_dir = csv_dir
         self.sample_rate = sample_rate
