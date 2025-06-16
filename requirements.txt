@@ -8,6 +8,10 @@ torch
 torchaudio
 transformers
 
+matplotlib
+IPython
+pandas
+
 
 # 유틸리티
 python-dotenv

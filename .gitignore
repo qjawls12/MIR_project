@@ -175,3 +175,9 @@ cython_debug/
 
 # previous bcresnet model file
 DP_resnet/
+
+#Data files
+Dataset/
+
+# Model state dictionary
+*.pth
