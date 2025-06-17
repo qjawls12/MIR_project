@@ -4,15 +4,15 @@
 % - directory path for the silence labels: [] if no silence label is used.
 %     The silence label should be in the following format: starting time (tab) ending time
 %     See examples in ../rtMRIdata/lab_sil
-% path.mri_data_dir = '/Volumes/One_Touch/rtMRI_Dataset/VOCOLAB/Singer9/mat';
-% path.output_data_dir = '/Volumes/One_Touch/rtMRI_Dataset/VOCOLAB/Singer9/out/seg';
-% path.morph_data_dir = '/Volumes/One_Touch/rtMRI_Dataset/VOCOLAB/Singer9/out/morph';
-% path.sil_lab = '/Volumes/One_Touch/rtMRI_Dataset/VOCOLAB/Singer9/out/lab_sil';
-% path.avi_data_dir = '/Volumes/One_Touch/rtMRI_Dataset/VOCOLAB/avi/Singer9';
+path.mri_data_dir = '/Volumes/One_Touch/rtMRI_Dataset/VOCOLAB/Singer10/mat';
+path.output_data_dir = '/Volumes/One_Touch/rtMRI_Dataset/VOCOLAB/Singer10/out/seg';
+path.morph_data_dir = '/Volumes/One_Touch/rtMRI_Dataset/VOCOLAB/Singer10/out/morph';
+path.sil_lab = '/Volumes/One_Touch/rtMRI_Dataset/VOCOLAB/Singer10/out/lab_sil';
+path.avi_data_dir = '/Volumes/One_Touch/rtMRI_Dataset/VOCOLAB/avi/Singer10';
 
 
-path.mri_data_dir = '/Volumes/One_Touch/MRI/Data/M1/mat';
-path.output_data_dir = '/Volumes/One_Touch/MRI/Data/M1/out/seg';
-path.morph_data_dir = '/Volumes/One_Touch/MRI/Data/M1/out/morph';
-path.sil_lab = '/Volumes/One_Touch/MRI/Data/M1/out/lab_sil';
-path.avi_data_dir = '/Volumes/One_Touch/MRI/Data/M1/avi';
+% path.mri_data_dir = '/Volumes/One_Touch/MRI/Data/F2/mat';
+% path.output_data_dir = '/Volumes/One_Touch/MRI/Data/F2/out/seg';
+% path.morph_data_dir = '/Volumes/One_Touch/MRI/Data/F2/out/morph';
+% path.sil_lab = '/Volumes/One_Touch/MRI/Data/F2/out/lab_sil';
+% path.avi_data_dir = '/Volumes/One_Touch/MRI/Data/F2/avi';

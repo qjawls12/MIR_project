@@ -210,12 +210,13 @@ def avi_boundary_set(input_file, output_file):
     :param y_min: Minimum y-coordinate.
     :param y_max: Maximum y-coordinate.
     """
+    output_tmp_file = output_file.replace('.avi', '_tmp.avi')
     width, height = get_video_dimensions(input_file)
     # Define the boundary coordinates
     x_min = int(0.25 * width)  # 26% of width
     x_max = int (0.6 * width)  # 60% of width
     y_min = int(0.3 * height)  # 30% of height
-    y_max = int(0.9*height)
+    y_max = int(1*height)
 
     
     command1 = [
@@ -223,22 +224,27 @@ def avi_boundary_set(input_file, output_file):
         '-i', input_file,
         '-vf', f'crop={x_max - x_min}:{y_max - y_min}:{x_min}:{y_min}',
         '-an',
-        output_file
+        output_tmp_file
     ]
-    
+   
     subprocess.run(command1, check=True)
 
     # brightness and contrast adjustment
     command2 = [
         'ffmpeg',
-        '-i', output_file,
-        '-vf', 'eq=brightness=0.05:contrast=1.2',
-        '-c:v', 'libx264',  # Video codec
+        '-i', output_tmp_file,
+        '-vf', 'eq=brightness=70.0:contrast=3.1',
+        '-c:v', 'libx264',  # Video codecß
         '-an',  # No audio
+        '-y',  # Overwrite output file if it exists
         output_file
     ]
     subprocess.run(command2, check=True)
     
+    # Remove the temporary file
+    if os.path.exists(output_tmp_file):
+        os.remove(output_tmp_file)
+    print(f"Boundary set for {input_file} and saved to {output_file}")
     return
 
 if __name__ == "__main__":
