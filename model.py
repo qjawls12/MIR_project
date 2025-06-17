@@ -187,7 +187,7 @@ class Model(nn.Module):
 
         # min_val이 max_val과 같은 경우 (예: 모든 값이 동일한 경우) 0으로 나누기 방지
         x = (x - min_val) / (max_val - min_val+1e-6)
-        print(f"{x.min}")
+        print(f"{x.min.item()}, {x.max().item()}")
         # print(f"DEBUG: x shape after projection: {x.shape}, dtype: {x.dtype}")
         # x = self.sigmoid(x)  # Sigmoid activation
         # Step 2: after self.projection
