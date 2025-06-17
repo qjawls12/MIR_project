@@ -187,3 +187,6 @@ Dataset/
 valid_data/
 loss_history/
 loss_history_*
+
+# etc
+*.deb
