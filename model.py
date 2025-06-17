@@ -16,7 +16,6 @@ from torch.utils.data import Dataset, DataLoader
 from sklearn.preprocessing import StandardScaler
 from utils import get_spectrogram, estimate_fundamental_frequency
 
-
 class TransformerBlock(nn.Module):
     def __init__(self, embed_dim, num_heads, ff_dim, dropout):
         super(TransformerBlock, self).__init__()
@@ -38,19 +37,21 @@ class TransformerBlock(nn.Module):
     # mask: boolean mask of shape (batch_size, seq_length) indicating padded positions
     # Returns: output tensor of shape (batch_size, seq_length, embed_dim)
     def forward(self, x, mask):
+        x = self.layernorm1(x)  # Layer normalization before attention
         attn_output, _ = self.attention(x, x, x, key_padding_mask=mask)
         if torch.isnan(attn_output).any():
             print(f"DEBUG: NaN/Inf in attn_output. Min: {attn_output.min().item()}, Max: {attn_output.max().item()}")
 
-        x = self.layernorm1(x + self.dropout(attn_output))
+        x = x + self.dropout(attn_output)
         if torch.isnan(x).any():
             print(f"DEBUG: NaN/Inf after layernorm1. Min: {x.min().item()}, Max: {x.max().item()}")
-
+        
+        x = self.layernorm2(x)  # Layer normalization after attention
         ffn_output = self.ffn(x)
         if torch.isnan(ffn_output).any():
             print(f"DEBUG: NaN/Inf in ffn_output. Min: {ffn_output.min().item()}, Max: {ffn_output.max().item()}")
 
-        x = self.layernorm2(x + self.dropout(ffn_output))
+        x = x + self.dropout(ffn_output)
         if torch.isnan(x).any():
             print(f"DEBUG: NaN/Inf after layernorm2. Min: {x.min().item()}, Max: {x.max().item()}")
         return x
@@ -97,7 +98,7 @@ class LSTMBlock(nn.Module):
 class Model(nn.Module):
     """input : spectrogram
        output: class probabilities and avtivation parameters"""
-    def __init__(self, n_fft = 1382, hidden_dim = 256, output_dim = 40, device='cuda'):
+    def __init__(self, n_fft = 1382, hidden_dim = 128, output_dim = 40, device='cuda'):
         super(Model, self).__init__()
         self.device = device
         self.n_fft = n_fft
@@ -105,9 +106,13 @@ class Model(nn.Module):
         self.hidden_dim = hidden_dim
         self.output_dim = output_dim
         self.preprocess = self.make_batch_length_mask
-        self.projection = nn.Linear(self.spectrogram_dim, hidden_dim)
+        self.mel_filterbank = torchaudio.functional.melscale_fbanks(n_freqs=self.spectrogram_dim,
+                                                                    n_mels=hidden_dim,sample_rate=16000,
+                                                                    f_min=0, f_max=8000,
+                                                                    norm='slaney',mel_scale='htk').to(device=self.device, dtype=torch.float32)
+        self.amplitude_to_db = torchaudio.transforms.AmplitudeToDB(stype='power', top_db=80).to(device=self.device, dtype=torch.float32)
         self.layernorm = nn.LayerNorm(self.hidden_dim)
-        self.transformer_encoder = TransformerEncoder(num_layers=8, embed_dim=hidden_dim, num_heads=16, ff_dim=hidden_dim * 2, dropout=0.1)
+        self.transformer_encoder = TransformerEncoder(num_layers=4, embed_dim=hidden_dim, num_heads=32, ff_dim=hidden_dim * 2, dropout=0.01)
         self.lstm_block = LSTMBlock(hidden_size=hidden_dim, input_size=hidden_dim, num_layers=3)
         self.fc = nn.Linear(hidden_dim, output_dim)
         self.relu = nn.ReLU()
@@ -131,7 +136,7 @@ class Model(nn.Module):
         f0 = torch.stack(f0, dim=0)
         
         return spectrogram, f0, lengths
-    
+   
     # Create a sequential length mask for the transformer block
     def make_batch_length_mask(self, audio_packed):
         # Create a mask for the transformer block
@@ -141,7 +146,7 @@ class Model(nn.Module):
         for i, length in enumerate(lengths):
             if length < max_length:
                 mask[i, length:] = True
-            # mask[i][f0[i] == 0.0] = True # Set silent values to 0
+            # mask[f0 == 0.0] = True # Set silent values to 0
         return specs.to(self.device), mask.to(self.device)
         
 
@@ -156,38 +161,64 @@ class Model(nn.Module):
             print(f"DEBUG: NaN/Inf in initial x_packed.data. Min: {x_packed.data.min().item()}, Max: {x_packed.data.max().item()}")
 
         x, mask = self.preprocess(x_packed) # x는 spectrogram (float32), mask는 bool
+        # print(f"DEBUG: x shape: {x.shape}, mask shape: {mask.shape}")
 
         # Step 1: after self.preprocess (spectrogram, mask)
-        if torch.isnan(x).any() or torch.isinf(x).any():
-            print(f"DEBUG: NaN/Inf in spectrogram after preprocess. Min: {x.min().item()}, Max: {x.max().item()}")
+        # if torch.isnan(x).any() or torch.isinf(x).any():
+        print(f"DEBUG: NaN/Inf in spectrogram after preprocess. Min: {x.min().item()}, Max: {x.max().item()}")
         if torch.isnan(mask).any(): # Mask는 bool이므로 NaN이 있을 수 없지만, 혹시 모를 타입 변환 오류 등 확인
              print(f"DEBUG: NaN in mask after preprocess.")
         if mask.all(dim=1).any():
             print("DEBUG: Warning! At least one sequence is entirely masked (all True in mask).")
-            print(f"DEBUG: Mask True ratio: {mask.sum().item() / mask.flatten().numel():.4f}")
+        # print(f"DEBUG: Mask True ratio: {mask.sum().item() / mask.flatten().numel():.4f}")
 
 
         # Projection Layer: spectrogram_dim (float32) -> hidden_dim (float32)
-        x = self.projection(x)
-        x = self.sigmoid(x)  # Sigmoid activation
+        x = torch.matmul(x.float(), self.mel_filterbank)
+        x = self.amplitude_to_db(x) # Convert to dB scale
+        # dB 스케일로 변환된 spectrogram_db 사용
+        min_val = torch.min(x, dim=1).values
+        min_val = torch.min(min_val, dim=1).values.unsqueeze(1).unsqueeze(1)
+        max_val = torch.max(x, dim=1).values  # (batch_size, hidden_dim)
+        max_val = torch.max(max_val, dim=1).values.unsqueeze(1).unsqueeze(1)
+        print(f"DEBUG: min_val shape: {min_val.shape}, max_val shape: {max_val.shape}")
+        print(f"DEBUG: min_val: {min_val.min().item()}, max_val: {max_val.max().item()}")
+        print(f"DEBUG: x shape before projection: {x.shape}, dtype: {x.dtype}")
+
+        # min_val이 max_val과 같은 경우 (예: 모든 값이 동일한 경우) 0으로 나누기 방지
+        x = (x - min_val) / (max_val - min_val+1e-6)
+        print(f"{x.min}")
+        # print(f"DEBUG: x shape after projection: {x.shape}, dtype: {x.dtype}")
+        # x = self.sigmoid(x)  # Sigmoid activation
         # Step 2: after self.projection
         
         
 
         # Batch, time, hidden_dim
-        x = self.layernorm(x)  # Batch Normalization
+        # x = self.layernorm(x)  # Batch Normalization
         if torch.isnan(x).any() or torch.isinf(x).any():
             print(f"DEBUG: NaN/Inf in x after projection. Min: {x.min().item()}, Max: {x.max().item()}")
 
 
         # AMP (autocast)가 여기서 float16으로 변환할 것입니다.
         # Transformer와 LSTM은 float16으로 연산합니다.
-        
-        if x.shape[1] > 256: # 시퀀스 길이에 따라 처리
+       
+        if x.shape[1] > 128: # 시퀀스 길이에 따라 처리
             x_list = []
-            for i in range(0, x.shape[1], 256):
-                current_x = x[:, i:i+256, :]
-                current_mask = mask[:, i:i+256]
+            for i in range(0, x.shape[1], 128):
+                if i + 128 > x.shape[1]:
+                    # 마지막 부분 처리
+                    current_x = x[:, i:, :]
+                    current_mask = mask[:, i:]
+                else:
+                    # 128 길이씩 슬라이딩
+                    current_x = x[:, i:i+128, :]
+                    current_mask = mask[:, i:i+128]
+                # if current_mask.all(dim=1).any():
+                #     x_list.append(current_x)  # 현재 슬라이스가 모두 마스크된 경우, 그냥 추가
+
+                # if current_mask.sum().item() / current_mask.flatten().numel() > 0.8:
+                #     x_list.append(current_x)  # 현재 슬라이스가 80% 이상 활성화된 경우, 그냥 추가
 
                 # Step 3a: before transformer_encoder inside loop
                 if torch.isnan(current_x).any() or torch.isinf(current_x).any():
@@ -202,30 +233,36 @@ class Model(nn.Module):
                     # 문제가 발생했다면 여기서 print될 것입니다.
                     # 다음 스텝으로 NaN이 전파되지 않도록 임시로 NaN을 0으로 채워볼 수 있습니다 (디버깅용)
                     # x_i = torch.nan_to_num(x_i, nan=0.0, posinf=0.0, neginf=0.0)
-
-                # LSTM Block
-                x_i = self.lstm_block(x_i)
-                # Step 4a: after lstm_block inside loop
-                if torch.isnan(x_i).any() or torch.isinf(x_i).any():
-                    print(f"DEBUG: NaN/Inf in x_i after lstm_block (loop). Min: {x_i.min().item()}, Max: {x_i.max().item()}")
-                    # x_i = torch.nan_to_num(x_i, nan=0.0, posinf=0.0, neginf=0.0)
-
-                # Final FC layer
-                x_i = self.fc(x_i)
-                # Step 5a: after fc inside loop
-                if torch.isnan(x_i).any() or torch.isinf(x_i).any():
-                    print(f"DEBUG: NaN/Inf in x_i after fc (loop). Min: {x_i.min().item()}, Max: {x_i.max().item()}")
-                    # x_i = torch.nan_to_num(x_i, nan=0.0, posinf=0.0, neginf=0.0)
-
-                # Sigmoid activation
-                x_i = self.sigmoid(x_i)
-                # Step 6a: after sigmoid inside loop
-                if torch.isnan(x_i).any() or torch.isinf(x_i).any():
-                    print(f"DEBUG: NaN/Inf in x_i after sigmoid (loop). Min: {x_i.min().item()}, Max: {x_i.max().item()}")
-                    # x_i = torch.nan_to_num(x_i, nan=0.0, posinf=0.0, neginf=0.0)
-
                 x_list.append(x_i)
             x = torch.cat(x_list, dim=1)
+            # print(f"DEBUG: x shape after concatenation: {x.shape}, dtype: {x.dtype}")
+
+            # LSTM Block
+            x = self.lstm_block(x)
+            # Step 4a: after lstm_block inside loop
+            if torch.isnan(x_i).any() or torch.isinf(x_i).any():
+                print(f"DEBUG: NaN/Inf in x_i after lstm_block (loop). Min: {x_i.min().item()}, Max: {x_i.max().item()}")
+                # x_i = torch.nan_to_num(x_i, nan=0.0, posinf=0.0, neginf=0.0)
+            print
+
+            # Final FC layer
+            x = self.fc(x)
+            # Step 5a: after fc inside loop
+            if torch.isnan(x_i).any() or torch.isinf(x_i).any():
+                print(f"DEBUG: NaN/Inf in x_i after fc (loop). Min: {x_i.min().item()}, Max: {x_i.max().item()}")
+                # x_i = torch.nan_to_num(x_i, nan=0.0, posinf=0.0, neginf=0.0)
+
+            # activation functions
+            x[:,:,:3] = self.sigmoid(x[:,:,:3]) # Assuming the first 3 channels are for activation parameters
+            x[:,:,3] = self.relu(x[:,:,3])  # Assuming the 4th channel is for real-valued output
+            x[:,:,4:] = self.sigmoid(x[:,:,4:])  # Assuming the rest are activation parameters
+            # Step 6a: after sigmoid inside loop
+            if torch.isnan(x_i).any() or torch.isinf(x_i).any():
+                print(f"DEBUG: NaN/Inf in x_i after sigmoid (loop). Min: {x_i.min().item()}, Max: {x_i.max().item()}")
+                # x_i = torch.nan_to_num(x_i, nan=0.0, posinf=0.0, neginf=0.0)
+
+                
+            
         else:
             # Step 3c: before transformer_encoder (no loop)
             if torch.isnan(x).any() or torch.isinf(x).any():
@@ -259,6 +296,7 @@ class Model(nn.Module):
         if torch.isnan(x).any() or torch.isinf(x).any():
             print(f"DEBUG: NaN/Inf in final output x. Min: {x.min().item()}, Max: {x.max().item()}")
             # x = torch.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
+          # Final fully connected layer
         return x
         # Final output
         

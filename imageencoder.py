@@ -163,7 +163,7 @@ def encode_image_data():
     
     # Load the trained encoder model
     encoder = Encoder().to(device)
-    encoder.load_state_dict(torch.load(f'imageencoder/image_encoder_epoch{5}.pth'))
+    encoder.load_state_dict(torch.load(f'imageencoder/image_encoder_epoch{20}.pth'))
     encoder.eval()
     
     # Create the dataset and dataloader
@@ -209,7 +209,7 @@ def encode_image_data():
 
     return
 
-train = True  # Set to True for training, False for testing
+train = False  # Set to True for training, False for testing
 if __name__ == "__main__" and train==True:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -267,7 +267,7 @@ if __name__ == "__main__" and train==True:
 if __name__ == "__main__" and train==False:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     encoder = CNNAutoEncoder().to(device)
-    encoder.load_state_dict(torch.load(f'imageencoder/image_encoder_epoch{5}.pth'))
+    encoder.load_state_dict(torch.load(f'imageencoder/image_encoder_epoch{20}.pth',weights_only=True))
     encoder.eval()
     print("Encoder model loaded successfully.")
     dataset = ImageDataset('Dataset', 'Dataset/npz', sample_rate=16000)
@@ -300,7 +300,8 @@ if __name__ == "__main__" and train==False:
     plt.show()
     plt.savefig('./reconstructed_images.png')
 
-    encode_image_data()
+
+    # encode_image_data()
     # encode_image_data('Dataset/npz', 'Dataset/npz_encoded')
     # dataset = ImageDataset('Dataset', 'Dataset/npz_encoded', sample_rate=16000)
     # print(f"Dataset length: {len(dataset)}")

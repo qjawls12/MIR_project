@@ -313,22 +313,39 @@ def vt_loss(est_tensor, target_tensor):
 def get_f0(intrinsic_feature: torch.Tensor):
     # Calculate the fundamental frequency (F0) from intrinsic features.
     # shape of intrinsic_feature: (batch, time, 3)
-    eps = 1e-8
+    eps = 1e-6
+    intrinsic_feature = intrinsic_feature.to(dtype=torch.float32)  # Ensure the tensor is in float32 format
 
     a_ta, a_ct, a_lc = intrinsic_feature[:, :, 0], intrinsic_feature[:, :, 1], intrinsic_feature[:, :, 2]
     elag = 0.2*(3.0*a_ct-a_ta)-0.2*a_lc
+    if torch.isnan(elag).any():
+        raise ValueError("NaN detected in elag calculation.")
+    elag = torch.clamp(elag, min=-0.4,max=0.6)  # Ensure elag is non-negative
     length = 1.6*(1+elag)
+    if torch.isnan(length).any():
+        raise ValueError("NaN detected in length calculation.")
     d_b = (a_ta * 0.4 +0.5*0.2)/(1+0.2*elag)
+    if torch.isnan(d_b).any():
+        raise ValueError("NaN detected in d_b calculation.")
     d = d_b + (0.2 +0.5*0.2)/(1+0.2*elag)
-    param = torch.tensor([[-0.5,-0.5,-0.5],[-0.35,0,-0.05],[0.5,0.4,1.0],[30.0, 1.39, 1.5],[4.4,17,6.5]], dtype=torch.float32, device=intrinsic_feature.device)
+    if torch.isnan(d).any():
+        raise ValueError("NaN detected in d calculation.")
+    param = torch.tensor([[-0.5,-0.5,-0.5],[-0.35,0,-0.05],[0.5,0.4,1.0],[30.0, 1.39, 1.5],[4.4,17,6.5]], dtype=torch.float32, device=intrinsic_feature.device).detach()  # Parameters for the sigmoid function
+    
     sig_p = []
     for i in range(param.shape[1]):
         relu1 = F.relu((param[2,i].item()/param[0,i].item())*(elag - param[0,i].item()))
         relu2 = F.relu(param[3,i].item()*(torch.exp(param[4,i].item() * (elag - param[1,i].item())) -param[4,i].item() * (elag - param[1,i].item()) -1))
+        if torch.isnan(relu1).any() or torch.isnan(relu2).any():
+            raise ValueError(f"NaN detected in relu1 or relu2 for parameter index {i}.")
         sig_p.append((-relu1 + relu2))
     sig_p = torch.stack(sig_p, dim=-1)
     sig_p = torch.sum(sig_p, dim=-1)
-    f0 = (1/2*length) * torch.sqrt((sig_p/1.04)*(1+(d_b*105*a_ta)/(d*sig_p+eps))+eps) 
+    if torch.isnan(sig_p).any():
+        raise ValueError("NaN detected in sig_p calculation.")
+    f0 = (1/(2*length+eps)) * torch.sqrt((sig_p/1.04)*(1+(d_b*105*a_ta)/(d*sig_p+eps))+eps)
+    if torch.isnan(f0).any():
+        raise ValueError("NaN detected in the calculated F0 values.")
     return f0 # shape: (batch, time)
 
 
@@ -343,10 +360,10 @@ def f0_loss(est_f0_feature, target_f0):
     Returns:
     torch.Tensor: Loss value.
     """
-    eps = 1e-8  # Small value to avoid division by zero
+    eps = 1e-6  # Small value to avoid division by zero
     target_f0, lengths = pad_packed_sequence(target_f0, batch_first=True)
     est_f0 = get_f0(est_f0_feature)
-    
+   
     # (batch, time)
     assert est_f0.shape[0] == target_f0.shape[0], "Estimated and target F0 tensors must have the same shape."
     loss = torch.zeros(1, dtype=torch.float32, device=est_f0.device)
@@ -359,14 +376,24 @@ def f0_loss(est_f0_feature, target_f0):
             est_f0_i = est_f0_i[:min_length]
             target_f0_i = target_f0_i[:min_length]
         assert est_f0_i.shape == target_f0_i.shape, "Estimated and target F0 tensors must have the same shape."
-        mask = (target_f0_i > 0).float() # target_f0_i가 0보다 큰 경우에만 마스크 생성
+        mask = (target_f0_i != 0).float() # target_f0_i가 0보다 큰 경우에만 마스크 생성
+        if torch.isnan(est_f0_i).any() or torch.isnan(target_f0_i).any():
+            raise ValueError("NaN detected in estimated or target F0 values.")
         est_f0_i = est_f0_i.to('cuda' if torch.cuda.is_available() else 'cpu')
         target_f0_i = target_f0_i.to('cuda' if torch.cuda.is_available() else 'cpu')
         mask = mask.to(est_f0_i.device)
-        est_f0_i = est_f0_i * mask  # Apply mask to estimated F0
-        target_f0_i = target_f0_i * mask  # Apply mask to target F0
+        if mask.sum() == 0:
+            continue  # Skip if mask is all zeros (no valid F0 values)
+        if torch.max(target_f0_i,dim=0,keepdim=False).values < eps:
+            continue  # Skip if target F0 is all zeros to avoid division by zero
+        est_f0_i = est_f0_i * mask /(torch.max(target_f0_i,dim=0,keepdim=False).values+eps) # Apply mask to estimated F0
+        target_f0_i = target_f0_i * mask /(torch.max(target_f0_i,dim=0,keepdim=False).values+eps) # Apply mask to target F0
+        if torch.isnan(est_f0_i).any() or torch.isnan(target_f0_i).any():
+            raise ValueError("NaN detected in masked estimated or target F0 values.")
         # Calculate the loss
         loss += torch.sum((est_f0_i - target_f0_i) ** 2)/ torch.sum(mask+eps)  # Mean Squared Error
+        if torch.isnan(loss).any():
+            raise ValueError("NaN detected in the calculated loss value.")
     return loss / est_f0.shape[0]  # Average loss over the batch
 
 
@@ -501,8 +528,14 @@ def spl_mse_loss(est_spl_feature, target_spl):
     """
     Calculate the Mean Squared Error loss for SPL.
     """
-    eps = 1e-8 # 작은 epsilon 값
+    eps = 1e-6 # 작은 epsilon 값
     target, lengths = pad_packed_sequence(target_spl, batch_first=True)
+    est_spl_feature = torch.log(est_spl_feature+eps)  # Convert estimated SPL to dB scale
+    est_spl_feature -= torch.max(est_spl_feature, dim=1, keepdim=True).values  # Normalize estimated SPL to have max value 1
+    est_spl_feature = est_spl_feature / (-torch.min(est_spl_feature, dim=1, keepdim=True).values + eps)  # Normalize estimated SPL to have max value 1
+    target = target - torch.max(target, dim=1, keepdim=True).values  # Normalize target SPL to have max value 0
+    target = target/(-torch.min(target, dim=1, keepdim=True).values + eps)  # Normalize target SPL to have max value 1
+    print(f"{target.max()}, {target.min()}, {est_spl_feature.max()}, {est_spl_feature.min()}")  # Debugging output to check target SPL range
     
     # est_spl_feature는 로그 스케일로 변환되었으므로, 타겟도 맞춰주거나
     # 아니면 로그 스케일 변환을 모델에서 처리하도록 하고 손실에서는 단순 MSE를 사용합니다.
@@ -524,6 +557,8 @@ def spl_mse_loss(est_spl_feature, target_spl):
         est_spl_feature_i = est_spl_feature_i.to('cuda' if torch.cuda.is_available() else 'cpu')
         target_i = target_i.to('cuda' if torch.cuda.is_available() else 'cpu')
 
+        # mask = (target_i != 0).float()  # target_i가 0보다 큰 경우에만 마스크 생성
+
         # Calculate MSE loss
         loss += F.mse_loss(est_spl_feature_i, target_i, reduction='mean') # 각 시퀀스별 평균
         
@@ -532,12 +567,15 @@ def spl_mse_loss(est_spl_feature, target_spl):
 
 # total_loss_with_dynamic_weighting 함수 수정
 def total_loss_with_dynamic_weighting(est, target,
-                                       initial_losses:dict = {'vt': None, 'f0': None, 'spl': None}, # spl_corr, spl_std 대신 spl 하나로
-                                       temperature=40.0):
+                                       initial_losses:dict,
+                                       temperature:float):
+    overall_coefficient = 10  # 전체 손실에 대한 계수
+
     vt_loss_value = vt_loss(est[:,:,4:], target[0])
     f0_loss_value = f0_loss(est[:,:,:3], target[1])
     spl_loss_value = spl_mse_loss(est[:,:,3], target[2]) # 새로운 spl_mse_loss 사용
     
+
     current_losses = {
         'vt': vt_loss_value,
         'f0': f0_loss_value,
@@ -588,7 +626,7 @@ def total_loss_with_dynamic_weighting(est, target,
                        weights['f0'] * f0_loss_value + \
                        weights['spl'] * spl_loss_value # spl_corr, spl_std 대신 spl 하나로
     
-    return total_loss_value
+    return overall_coefficient * total_loss_value
 
 
 # dataset = AudioDataset('Dataset', 'Dataset/npz', sample_rate=16000)  # Initialize the dataset with the data directory and CSV directory
