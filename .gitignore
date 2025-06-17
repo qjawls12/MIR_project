@@ -182,3 +182,8 @@ Dataset/
 
 # Model state dictionary
 *.pth
+
+# loss, and accuracy files
+valid_data/
+loss_history/
+loss_history_*
