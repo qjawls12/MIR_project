@@ -1,4 +1,5 @@
 import os
+import subprocess
 import torch
 import torchaudio
 import librosa
@@ -13,8 +14,7 @@ import torch.nn as nn
 from tqdm import tqdm
 
 from torch.utils.data import Dataset, DataLoader
-from utils import get_spectrogram, estimate_spectrogram_spl, AudioDataset, pack_collate_fn
-import utils
+from utils import AudioDataset
 
 class CNNAutoEncoder(nn.Module):
   def __init__(self):
@@ -78,7 +78,25 @@ class CNNAutoEncoder(nn.Module):
 class Encoder(CNNAutoEncoder):
     def __init__(self):
         super(Encoder, self).__init__()
+        self.load_state_dict(torch.load(f'imageencoder/image_encoder_epoch{20}.pth', weights_only=True, map_location='cuda' if torch.cuda.is_available() else 'cpu'))
         
+
+    def k_means_clustering(self):
+        """
+        Perform k-means clustering on the encoded data.
+        """
+        # Load the encoded data
+        encoded_data = np.load('Dataset/npz_encoded/encoded_data.npz')
+        vt_image = encoded_data['vt_image']
+        
+        # Perform k-means clustering
+        from sklearn.cluster import KMeans
+        kmeans = KMeans(n_clusters=128, random_state=36)
+        kmeans.fit(vt_image.reshape(vt_image.shape[0], -1))
+        labels = kmeans.labels_
+        print(f"K-means clustering completed with {kmeans.n_clusters} clusters.")
+
+
 
     def forward(self, x):
         x, indices1 = self.pool1(x)  # Apply pooling and store indices
@@ -88,13 +106,101 @@ class Encoder(CNNAutoEncoder):
         x = self.layer3(x)
         return x  # Return the encoded representation and indices for unpooling
     
+    
+    
 class Decoder(CNNAutoEncoder):
     def __init__(self):
         super(Decoder, self).__init__()
+        self.load_state_dict(torch.load(f'imageencoder/image_encoder_epoch{20}.pth', weights_only=True, map_location='cuda' if torch.cuda.is_available() else 'cpu'))
+        
+
+    def numpy_array_to_video_ffmpeg(
+        self,
+        numpy_array: np.ndarray,
+        output_filename: str,
+        fps: int = 23.18,
+        codec: str = "libx264", # 비디오 코덱 (H.264)
+        pixel_format_out: str = "yuv420p", # 출력 픽셀 포맷 (대부분의 플레이어에서 호환)
+        pixel_format_in: str = "rgb24" # ffmpeg에 전달할 입력 픽셀 포맷
+        ):
+        """
+        (number_of_frame, height, width, depth) 크기의 NumPy 배열을 동영상 파일로 변환합니다.
+
+        Args:
+        numpy_array (np.ndarray): 입력 NumPy 배열.
+                                  형태: (frames, height, width, channels)
+                                  channels: 3 (RGB) 또는 4 (RGBA)
+                                  데이터 타입: uint8 (0-255)이어야 합니다.
+        output_filename (str): 출력될 동영상 파일의 이름 (예: "output.mp4").
+        fps (int): 초당 프레임 수.
+        codec (str): 사용할 비디오 코덱. 기본값은 "libx264" (MP4).
+        pixel_format_out (str): 출력 동영상의 픽셀 포맷. 기본값은 "yuv420p" (넓은 호환성).
+        pixel_format_in (str): ffmpeg가 NumPy 배열에서 받을 것으로 예상하는 입력 픽셀 포맷.
+                                기본값은 "rgb24" (RGB 8비트).
+        """
+
+        if numpy_array.dtype != np.uint8:
+            print(f"경고: NumPy 배열의 데이터 타입이 {numpy_array.dtype}입니다. uint8로 변환합니다.")
+            # NumPy 배열의 값을 0-255 범위로 스케일링하여 uint8로 변환
+            # float 타입이라면 0-1 범위로 정규화된 것을 0-255로 변환
+        if np.issubdtype(numpy_array.dtype, np.floating):
+            numpy_array = (numpy_array.clip(0, 1) * 255).astype(np.uint8)
+        else: # 다른 타입이라면 단순히 uint8로 변환 (값 범위는 유지된다고 가정)
+            numpy_array = numpy_array.astype(np.uint8)
+
+
+        num_frames, height, width, channels = numpy_array.shape
+
+        if channels == 3:
+            pixel_format_in = "rgb24"
+        elif channels == 4:
+            pixel_format_in = "rgba"
+        else:
+            raise ValueError("채널 수는 3 (RGB) 또는 4 (RGBA)여야 합니다.")
+
+        # ffmpeg 명령 구성
+        command = [
+            'ffmpeg',
+            '-y',  # 출력 파일이 존재하면 덮어쓰기
+            '-f', 'rawvideo',  # 입력 포맷: raw video
+            '-vcodec', 'rawvideo', # 입력 비디오 코덱: raw video
+            '-s', f'{width}x{height}',  # 프레임 크기
+            '-pix_fmt', pixel_format_in,  # 입력 픽셀 포맷 (예: rgb24, rgba)
+            '-r', str(fps),  # 입력 프레임 레이트
+            '-i', '-',  # 입력은 stdin (표준 입력)에서 받음
+            '-c:v', codec,  # 출력 비디오 코덱
+            '-pix_fmt', pixel_format_out,  # 출력 픽셀 포맷 (예: yuv420p, argb)
+            '-loglevel', 'warning', # 경고 레벨만 표시
+            output_filename
+            ]
+
+        print(f"ffmpeg 명령: {' '.join(command)}")
+
+        # subprocess를 사용하여 ffmpeg 프로세스 시작
+        # stdin=subprocess.PIPE로 설정하여 NumPy 데이터를 파이프로 전달
+        # stdout=subprocess.PIPE, stderr=subprocess.PIPE로 설정하여 ffmpeg의 출력을 캡처 (디버깅용)
+        process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+        # NumPy 배열 데이터를 ffmpeg 프로세스의 stdin으로 전달
+        # 각 프레임은 (height * width * channels) 크기의 바이트열이어야 합니다.
+        # .tobytes()를 사용하여 NumPy 배열을 바이트열로 직렬화합니다.
+        for i in range(num_frames):
+            process.stdin.write(numpy_array[i].tobytes())
+
+        # stdin을 닫고 ffmpeg 프로세스가 완료될 때까지 기다립니다.
+        stdout, stderr = process.communicate()
+
+        if process.returncode != 0:
+            print(f"ffmpeg 에러: {stderr.decode('utf-8')}")
+            raise RuntimeError("ffmpeg 변환 실패")
+        else:
+            print(f"'{output_filename}'으로 동영상 변환 성공.")
+    
+        return
     
     def forward(self, x):
-        x = self.unpool2(x)
         x = self.layer4(x)
+        x = self.unpool2(x)
         x = self.layer5(x)
         x = self.layer6(x)
         return x
@@ -209,6 +315,10 @@ def encode_image_data():
 
     return
 
+
+
+
+
 train = False  # Set to True for training, False for testing
 if __name__ == "__main__" and train==True:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -305,4 +415,4 @@ if __name__ == "__main__" and train==False:
     # encode_image_data('Dataset/npz', 'Dataset/npz_encoded')
     # dataset = ImageDataset('Dataset', 'Dataset/npz_encoded', sample_rate=16000)
     # print(f"Dataset length: {len(dataset)}")
-    # print(len(dataset.npz_path_list))
+    # print(len(dataset.npz_path_list)

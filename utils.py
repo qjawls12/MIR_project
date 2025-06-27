@@ -11,6 +11,7 @@ import pandas as pd
 from torch.nn.utils.rnn import pad_sequence, pack_sequence, pad_packed_sequence, PackedSequence
 import torch.nn as nn
 import torch.nn.functional as F
+# import imageencoder as ie
 
 # 파형 시각화 함수
 def plot_waveform(waveform, sample_rate=16000):
@@ -275,39 +276,75 @@ class AudioDataset(torch.utils.data.Dataset):
         return
     
 
-
-# loss functions
-def vt_loss(est_tensor, target_tensor):
-    """
-    Calculate the loss between estimated and target vocal tract data.
+# decoder = ie.Decoder().to('cuda')  # Initialize the image encoder
+# # loss functions
+# def vt_loss(est_tensor, target_tensor):
+#     """
+#     Calculate the loss between estimated and target vocal tract data.
     
-    Parameters:
-    est_tensor (torch.Tensor): Estimated vocal tract data tensor.
-    target_tensor (torch.Tensor): Target vocal tract data tensor.
+#     Parameters:
+#     est_tensor (torch.Tensor): Estimated vocal tract data tensor.
+#     target_tensor (torch.Tensor): Target vocal tract data tensor.
     
-    Returns:
-    torch.Tensor: Loss value.
-    """
-    target, lengths = pad_packed_sequence(target_tensor, batch_first=True)
-    target = target.reshape(target.shape[0], target.shape[1], -1)  # Reshape (batch, time, w, h) to (batch, time, w*h)
-    assert est_tensor.shape[0] == target.shape[0], "Estimated and target tensors must have the same shape."
-    loss = torch.zeros(1, dtype=torch.float32, device=est_tensor.device)
+#     Returns:
+#     torch.Tensor: Loss value.
+#     """
+#     global decoder
+#     target, lengths = pad_packed_sequence(target_tensor, batch_first=True)  # Reshape (batch, time, w, h) to (batch, time, w*h)
+#     num_batches = target.shape[0]
+#     num_frames = target.shape[1]
 
-    for i in range(est_tensor.shape[0]):
-        est_tensor_i = est_tensor[i, :lengths[i], :]
-        target_tensor_i = target[i, :lengths[i], :]
-        if est_tensor_i.shape[0] != target_tensor_i.shape[0]:
-            # If the shapes do not match, truncate the longer tensor to match the shorter one
-            min_length = min(est_tensor_i.shape[0], target_tensor_i.shape[0])
-            est_tensor_i = est_tensor_i[:min_length, :]
-            target_tensor_i = target_tensor_i[:min_length, :]
-        assert est_tensor_i.shape == target_tensor_i.shape, "Estimated and target tensors must have the same shape."
-        # Calculate the length of the vocal tract data
-        est_tensor_i = est_tensor_i.to('cuda' if torch.cuda.is_available() else 'cpu')
-        target_tensor_i = target_tensor_i.to('cuda' if torch.cuda.is_available() else 'cpu')
-        loss += torch.mean((torch.norm(est_tensor_i - target_tensor_i, dim=-1)))  # Mean Euclidean distance
-    loss /= est_tensor.shape[0]  # Average loss over the batch
-    return loss
+#     reference_feature_reshape = target.reshape(target.shape[0] * target.shape[1], 6, 6).unsqueeze(0)
+#     est_tensor = est_tensor.reshape(est_tensor.shape[0], est_tensor.shape[1], 6, 6)  # Reshape to (batch, time, w, h)
+#     user_feature_reshape = est_tensor.reshape(est_tensor.shape[0] * est_tensor.shape[1], 6, 6).unsqueeze(0)
+    
+#     assert reference_feature_reshape.shape == user_feature_reshape.shape, "Reference and user feature shapes do not match"
+    
+#     if reference_feature_reshape.shape[1] > 512:
+#         reference_feature_list = []
+#         user_features_list = []
+#         for i in range(0, reference_feature_reshape.shape[1], 512):
+#             if i + 512 < reference_feature_reshape.shape[1]:
+#                 reference_feature_chunk = reference_feature_reshape[0, i:i + 512, :, :].unsqueeze(1)  # Take the first batch and first channel
+#                 user_feature_chunk = user_feature_reshape[0, i:i + 512, :, :].unsqueeze(1)  # Take the first batch and first channel
+#             else:
+#                 reference_feature_chunk = reference_feature_reshape[0, i:, :, :].unsqueeze(1)  # Take the first batch and first channel
+#                 user_feature_chunk = user_feature_reshape[0, i:, :, :].unsqueeze(1)  # Take the first batch and first channel
+#             reference_feature_chunk = decoder(reference_feature_chunk)
+#             user_feature_chunk = decoder(user_feature_chunk)
+#             reference_feature_chunk = reference_feature_chunk.squeeze(1)  # Remove the channel dimension
+#             user_feature_chunk = user_feature_chunk.squeeze(1)
+#             reference_feature_list.append(reference_feature_chunk)
+#             user_features_list.append(user_feature_chunk)
+#         reference_feature = torch.cat(reference_feature_list, dim=0)
+#         user_feature = torch.cat(user_features_list, dim=0)
+#     else:
+#         reference_feature = reference_feature_reshape[0, :, :, :].unsqueeze(1)  # Take the first batch and first channel
+#         user_feature = user_feature_reshape[0, :, :, :].unsqueeze(1)  # Take the first batch and first channel
+#         reference_feature = decoder(reference_feature)
+#         user_feature = decoder(user_feature)
+#         reference_feature = reference_feature.squeeze(1) # Remove the channel dimension
+#         user_feature = user_feature.squeeze(1)
+#     est_tensor = reference_feature.reshape(num_batches, num_frames, -1)/255  # Reshape back to (batch, time, w*h)
+#     target = user_feature.reshape(num_batches, num_frames, -1)/255
+#     assert est_tensor.shape[0] == target.shape[0], "Estimated and target tensors must have the same shape."
+#     loss = torch.zeros(1, dtype=torch.float32, device=est_tensor.device)
+
+#     for i in range(est_tensor.shape[0]):
+#         est_tensor_i = est_tensor[i, :lengths[i], :]
+#         target_tensor_i = target[i, :lengths[i], :]
+#         if est_tensor_i.shape[0] != target_tensor_i.shape[0]:
+#             # If the shapes do not match, truncate the longer tensor to match the shorter one
+#             min_length = min(est_tensor_i.shape[0], target_tensor_i.shape[0])
+#             est_tensor_i = est_tensor_i[:min_length, :]
+#             target_tensor_i = target_tensor_i[:min_length, :]
+#         assert est_tensor_i.shape == target_tensor_i.shape, "Estimated and target tensors must have the same shape."
+#         # Calculate the length of the vocal tract data
+#         est_tensor_i = est_tensor_i.to('cuda' if torch.cuda.is_available() else 'cpu')
+#         target_tensor_i = target_tensor_i.to('cuda' if torch.cuda.is_available() else 'cpu')
+#         loss += torch.mean((torch.norm(est_tensor_i - target_tensor_i, dim=-1)))  # Mean Euclidean distance
+#     loss /= est_tensor.shape[0]  # Average loss over the batch
+#     return loss
 
 
 def get_f0(intrinsic_feature: torch.Tensor):

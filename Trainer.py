@@ -20,9 +20,10 @@ import letalker as lt
 from tqdm import tqdm
 from torch.amp import autocast, GradScaler
 
+import imageencoder as ie
 from model import Model
 from utils import AudioDataset, get_spectrogram, estimate_spectrogram_spl, estimate_fundamental_frequency, \
-                                pack_collate_fn, vt_loss, get_f0, f0_loss, spl_mse_loss
+                                pack_collate_fn, get_f0, f0_loss, spl_mse_loss
 
 
 class Config:
@@ -34,17 +35,17 @@ class Config:
         self.calc_gpu = 0
         self.use_amp = False
         self.batch_size = 16
-        self.learning_rate = 1e-3
-        self.num_epochs = 50
+        self.learning_rate = 1e-5
+        self.num_epochs = 20
         self.save_interval = 1
-        self.model_dir = "models"
+        self.model_dir = "models_encoded"
         self.model_name = "model.pth"
-        self.epoch = 29
-        self.load_model = True  # Set to True if you want to load a pre-trained model
+        self.epoch = 1
+        self.load_model = False # Set to True if you want to load a pre-trained model
         self.train_data_path = "Dataset"
-        self.temperature = 10.0
-        self.loss_dir = "loss_history"
-        self.valid_dir = "valid_data"
+        self.temperature = 5.0
+        self.loss_dir = "loss_history_encoded"
+        self.valid_dir = "valid_data_encoded"
         if self.load_model:
             self.start_epoch = self.epoch
         else:
@@ -74,13 +75,16 @@ class Trainer:
         self.calc_device = torch.device("cuda:%d" % self.config.calc_gpu if torch.cuda.is_available() else "cpu")
         self._load_data()
         self._load_model()
+        self.decoder = ie.Decoder().to(self.calc_device)  # Initialize the image encoder
+        self.decoder.eval()
+        self.decoder.requires_grad_(False)  # Disable gradients for the decoder
         self.initial_losses = {'vt': None, 'f0': None, 'spl': None}
         if self.config.load_model:
-            self.initial_losses['vt'] = torch.tensor(0.9218351244926453, dtype=torch.float32,
+            self.initial_losses['vt'] = torch.tensor(3.1521499156951904, dtype=torch.float32,
                                                      device=self.calc_device)
-            self.initial_losses['f0'] = torch.tensor(0.3032028079032898, dtype=torch.float32,
+            self.initial_losses['f0'] = torch.tensor(0.2684382498264313, dtype=torch.float32,
                                                      device=self.calc_device)
-            self.initial_losses['spl'] = torch.tensor(0.0931912288069725, dtype=torch.float32,
+            self.initial_losses['spl'] = torch.tensor(0.36777225136756897, dtype=torch.float32,
                                                       device=self.calc_device)
 
     def _load_data(self):
@@ -108,6 +112,85 @@ class Trainer:
             else:
                 print(f"Model file {model_path} does not exist. Starting with a new model.")
 
+
+    
+    # loss functions
+    @torch.no_grad()
+    def vt_loss(self,est_tensor, target_tensor):
+        """
+        Calculate the loss between estimated and target vocal tract data.
+        
+        Parameters:
+        est_tensor (torch.Tensor): Estimated vocal tract data tensor.
+        target_tensor (torch.Tensor): Target vocal tract data tensor.
+        
+        Returns:
+        torch.Tensor: Loss value.
+        """
+       
+        target, lengths = pad_packed_sequence(target_tensor, batch_first=True)  # Reshape (batch, time, w, h) to (batch, time, w*h)
+        num_batches = target.shape[0]
+        num_frames = target.shape[1]
+        if est_tensor.shape[1] != target.shape[1]:
+            min_length = min(est_tensor.shape[1], target.shape[1])
+            if torch.max(lengths) > min_length:
+                lengths = torch.clamp(lengths, max=min_length)
+            est_tensor = est_tensor[:, :min_length, :]
+            target = target[:, :min_length, :, :]
+            num_frames = target.shape[1]
+
+        reference_feature_reshape = target.reshape(target.shape[0] * target.shape[1], 6, 6).unsqueeze(0)
+        est_tensor = est_tensor.reshape(est_tensor.shape[0], est_tensor.shape[1], 6, 6)  # Reshape to (batch, time, w, h)
+        user_feature_reshape = est_tensor.reshape(est_tensor.shape[0] * est_tensor.shape[1], 6, 6).unsqueeze(0)
+        
+        assert reference_feature_reshape.shape == user_feature_reshape.shape, "Reference and user feature shapes do not match"
+        
+        if reference_feature_reshape.shape[1] > 512:
+            reference_feature_list = []
+            user_features_list = []
+            for i in range(0, reference_feature_reshape.shape[1], 512):
+                if i + 512 < reference_feature_reshape.shape[1]:
+                    reference_feature_chunk = reference_feature_reshape[0, i:i + 512, :, :].unsqueeze(1)  # Take the first batch and first channel
+                    user_feature_chunk = user_feature_reshape[0, i:i + 512, :, :].unsqueeze(1)  # Take the first batch and first channel
+                else:
+                    reference_feature_chunk = reference_feature_reshape[0, i:, :, :].unsqueeze(1)  # Take the first batch and first channel
+                    user_feature_chunk = user_feature_reshape[0, i:, :, :].unsqueeze(1)  # Take the first batch and first channel
+                reference_feature_chunk = self.decoder(reference_feature_chunk)
+                user_feature_chunk = self.decoder(user_feature_chunk)
+                reference_feature_chunk = reference_feature_chunk.squeeze(1)  # Remove the channel dimension
+                user_feature_chunk = user_feature_chunk.squeeze(1)
+                reference_feature_list.append(reference_feature_chunk)
+                user_features_list.append(user_feature_chunk)
+            reference_feature = torch.cat(reference_feature_list, dim=0)
+            user_feature = torch.cat(user_features_list, dim=0)
+        else:
+            reference_feature = reference_feature_reshape[0, :, :, :].unsqueeze(1)  # Take the first batch and first channel
+            user_feature = user_feature_reshape[0, :, :, :].unsqueeze(1)  # Take the first batch and first channel
+            reference_feature = self.decoder(reference_feature)
+            user_feature = self.decoder(user_feature)
+            reference_feature = reference_feature.squeeze(1) # Remove the channel dimension
+            user_feature = user_feature.squeeze(1)
+        est_tensor = reference_feature.reshape(num_batches, num_frames, -1)/torch.max(reference_feature)  # Reshape back to (batch, time, w*h)
+        target = user_feature.reshape(num_batches, num_frames, -1)/torch.max(user_feature)  # Reshape back to (batch, time, w*h)
+        assert est_tensor.shape[0] == target.shape[0], "Estimated and target tensors must have the same shape."
+        loss = torch.zeros(1, dtype=torch.float32, device=est_tensor.device)
+
+        for i in range(est_tensor.shape[0]):
+            est_tensor_i = est_tensor[i, :lengths[i], :]
+            target_tensor_i = target[i, :lengths[i], :]
+            if est_tensor_i.shape[0] != target_tensor_i.shape[0]:
+                # If the shapes do not match, truncate the longer tensor to match the shorter one
+                min_length = min(est_tensor_i.shape[0], target_tensor_i.shape[0])
+                est_tensor_i = est_tensor_i[:min_length, :]
+                target_tensor_i = target_tensor_i[:min_length, :]
+            assert est_tensor_i.shape == target_tensor_i.shape, "Estimated and target tensors must have the same shape."
+            # Calculate the length of the vocal tract data
+            est_tensor_i = est_tensor_i.to('cuda' if torch.cuda.is_available() else 'cpu')
+            target_tensor_i = target_tensor_i.to('cuda' if torch.cuda.is_available() else 'cpu')
+            loss += torch.mean((torch.norm(est_tensor_i - target_tensor_i, dim=-1)))  # Mean Euclidean distance
+        loss /= est_tensor.shape[0]  # Average loss over the batch
+        return loss
+
     def loss_function(self, est, target, initial_losses:dict,temperature:float):
         """
         Custom loss function that computes the total loss with dynamic weighting.
@@ -126,7 +209,7 @@ class Trainer:
         f0_target = f0_target.to(self.calc_device)  # Move to calc_device
         spl_target = target[2]
         spl_target = spl_target.to(self.calc_device)  # Move to calc_device
-        vt_loss_value = vt_loss(est[:,:,4:], vt_target)
+        vt_loss_value = self.vt_loss(est[:,:,4:], vt_target)
         f0_loss_value = f0_loss(est[:,:,:3], f0_target)
         spl_loss_value = spl_mse_loss(est[:,:,3], spl_target) # 새로운 spl_mse_loss 사용
     
@@ -299,6 +382,7 @@ class Trainer:
 
         loss_history = []
         for epoch in tqdm(range(self.config.start_epoch,self.config.num_epochs), desc="Training Epochs", leave=False):
+            self.model.train()
             if self.config.load_model and epoch == self.config.start_epoch:
                 print(f"Starting epoch {epoch+1}/{self.config.num_epochs}")
                 losses = pd.read_csv(os.path.join(self.config.loss_dir, f"loss_history_epoch_{epoch}.csv"))['Loss'].tolist()
@@ -357,7 +441,7 @@ class Trainer:
                         # 예: print(outputs[0, :10])
                         # 예: print(targets_on_device[0][0, :10])
                         # 예: 모델의 중간 레이어 출력에 hook을 걸어 nan/inf 발생 위치 확인 (고급 디버깅)
-                        # raise ValueError("Loss became NaN. Aborting training.")
+                        raise ValueError("Loss became NaN. Aborting training.")
                 # --- autocast 블록 끝 ---
 
                 # --- AMP 사용 시 기울기 스케일링 및 백워드 로직 ---
@@ -370,7 +454,7 @@ class Trainer:
                     self.scaler.unscale_(self.optimizer) # 이 라인이 에러를 발생시킨 부분
                 
                     # 3. 기울기 클리핑 (nan 문제 해결에도 도움)
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=0.01) # max_norm 값 조정 가능
+                    # torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1) # max_norm 값 조정 가능
                 
                     # 4. 옵티마이저 스텝 및 스케일러 업데이트
                     self.scaler.step(self.optimizer)
@@ -379,7 +463,7 @@ class Trainer:
                     # AMP를 사용하지 않을 경우 일반적인 backward() 및 step()
                     loss.backward()
                     # AMP 미사용 시에도 기울기 클리핑 적용 가능
-                    torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=0.01)
+                    # torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1)
                     self.optimizer.step()
                 # --- AMP 로직 끝 ---
 
@@ -483,5 +567,4 @@ class Trainer:
 if __name__ == "__main__":
     config = Config()
     trainer = Trainer(config)
-    trainer.validate()
     trainer.train()
