@@ -181,12 +181,15 @@ DP_resnet/
 Dataset/
 
 # Model state dictionary
-*.pth
+
 
 # loss, and accuracy files
 valid_data/
+valid_data_*
 loss_history/
 loss_history_*
 
 # etc
 *.deb
+*.wav
+*.mp4
