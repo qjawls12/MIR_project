@@ -8,7 +8,6 @@ from scipy.io import wavfile
 import matplotlib.pyplot as plt
 import IPython.display as IPD
 import pandas as pd
-<<<<<<< HEAD
 from torch.nn.utils.rnn import pad_sequence, pack_sequence, pad_packed_sequence, PackedSequence
 import torch.nn as nn
 import torch.nn.functional as F
@@ -16,19 +15,11 @@ import torch.nn.functional as F
 
 # 파형 시각화 함수
 def plot_waveform(waveform, sample_rate=16000):
-=======
-
-# 파형 시각화 함수
-def plot_waveform(waveform, sample_rate):
->>>>>>> 0cc1e3abf2db2d9401c7741cfbf0c3ba2af425e0
     plt.figure(figsize=(12, 4))
     plt.plot(waveform.t().numpy())
     plt.title('Waveform')
     plt.xlabel('Sample')
-<<<<<<< HEAD
     plt.xticks(np.arange(0, waveform.shape[1], sample_rate), np.arange(0, waveform.shape[1] / sample_rate, 1))
-=======
->>>>>>> 0cc1e3abf2db2d9401c7741cfbf0c3ba2af425e0
     plt.ylabel('Amplitude')
     plt.xlim(0, waveform.shape[1])
     plt.show()
@@ -55,7 +46,6 @@ def load_audio_and_vt_data(wav_path, sample_rate=16000):
     audio_tensor, sr = torchaudio.load(wav_path)
     if sr != sample_rate:
         audio_tensor = torchaudio.transforms.Resample(orig_freq=sr, new_freq=sample_rate)(audio_tensor)
-<<<<<<< HEAD
     audio_tensor = audio_tensor.mean(dim=0, keepdim=False)  # Convert to mono if stereo
     mat = scipy.io.loadmat(mat_path)
     vt_image = np.zeros((mat['pts_lb_c'].shape[0], 136, 136), dtype=np.uint8)  # 136x136 크기의 빈 이미지 생성
@@ -75,22 +65,6 @@ def load_audio_and_vt_data(wav_path, sample_rate=16000):
 
 # Estimate fundamental frequency (F0) using librosa's pyin function
 def estimate_fundamental_frequency(audio_np, sample_rate=16000):
-=======
-    audio_tensor = audio_tensor.mean(dim=0, keepdim=True)  # Convert to mono if stereo
-    mat = scipy.io.loadmat(mat_path)
-    vt_data1 = torch.tensor(mat['pts_lb_c'], dtype=torch.float32)
-    vt_data2 = torch.tensor(mat['pts_rt_c'], dtype=torch.float32)
-    vt_data1[vt_data1 > 100] = 0  # Filter out values greater than 100
-    vt_data2[vt_data2 > 100] = 0  # Filter out values greater than 100
-    mat_data = {
-        'inner_tract': vt_data1,
-        'outer_tract': vt_data2
-    }
-    return audio_tensor, mat_data
-
-# Estimate fundamental frequency (F0) using librosa's pyin function
-def estimate_fundamental_frequency(audio_tensor, sample_rate=16000):
->>>>>>> 0cc1e3abf2db2d9401c7741cfbf0c3ba2af425e0
     """
     Estimate the fundamental frequency (F0) from the audio tensor.
     
@@ -101,7 +75,6 @@ def estimate_fundamental_frequency(audio_tensor, sample_rate=16000):
     Returns:
     np.ndarray: Estimated F0 values.
     """
-<<<<<<< HEAD
     if audio_np.ndim > 1:
         audio_np = audio_np.mean(axis=0)  # Convert to mono if stereo
     audio_np = np.concatenate([np.zeros(345), audio_np, np.zeros(1600)],axis=0)  # Add padding to match librosa's expected input shape
@@ -115,25 +88,10 @@ def estimate_fundamental_frequency(audio_tensor, sample_rate=16000):
 def get_spectrogram(audio_np, sample_rate=16000):
     """
     Compute the spectrogram of the audio tensor.
-=======
-    audio_np = audio_tensor.numpy()
-    if audio_np.ndim > 1:
-        audio_np = audio_np.mean(axis=0)  # Convert to mono if stereo
-    audio_np = np.concatenate(np.zeros(345), audio_np, np.zeros(1600),axis=0)  # Add padding to match librosa's expected input shape
-    f0, voiced_flag, voiced_probs = librosa.pyin(audio_np, fmin=50, fmax=1000,
-                                                 sr=sample_rate, frame_length = 1382, hop_length = 691)
-    return torch.tensor(f0, dtype=torch.float32)
-
-# Estimate Mel spectrogram from audio tensor
-def get_mel_spectrogram(audio_tensor, sample_rate=16000, n_mels=128):
-    """
-    Compute the Mel spectrogram of the audio tensor.
->>>>>>> 0cc1e3abf2db2d9401c7741cfbf0c3ba2af425e0
     
     Parameters:
     audio_tensor (torch.Tensor): Audio tensor.
     sample_rate (int): Sample rate of the audio.
-<<<<<<< HEAD
     
     
     Returns:
@@ -155,30 +113,11 @@ def estimate_spectrogram_spl(audio, sample_rate=16000):
     
     Parameters:
     spectrogram (torch.Tensor): spectrogram tensor.
-=======
-    n_mels (int): Number of Mel bands.
-    
-    Returns:
-    torch.Tensor: Mel spectrogram.
-    """
-    audio_tensor = torch.cat((torch.zeros(345), audio_tensor, torch.zeros(1600)), dim=0)  # Add padding to match librosa's expected input shape
-    mel_transform = torchaudio.transforms.MelSpectrogram(sample_rate=sample_rate, win_length=1382, hop_length = 691, n_mels=n_mels)
-    return mel_transform(audio_tensor)
-
-# Estimate sound pressure level (SPL) from Mel spectrogram
-def estimate_spectrogram_spl(audio, sample_rate=16000):
-    """
-    Estimate the sound pressure level (SPL) from the Mel spectrogram.
-    
-    Parameters:
-    mel_spectrogram (torch.Tensor): Mel spectrogram tensor.
->>>>>>> 0cc1e3abf2db2d9401c7741cfbf0c3ba2af425e0
     sample_rate (int): Sample rate of the audio.
     
     Returns:
     torch.Tensor: Estimated SPL values.
     """
-<<<<<<< HEAD
     spectrogram = get_spectrogram(audio, sample_rate=sample_rate)
     # Convert spectrogram to dB scale
     spec_db = torchaudio.transforms.AmplitudeToDB()(spectrogram)
@@ -189,18 +128,6 @@ def estimate_spectrogram_spl(audio, sample_rate=16000):
 
 # label data
 def label_vt_f0_spl(wav_path, npz_dir, sample_rate=16000):
-=======
-    mel_spectrogram = get_mel_spectrogram(audio, sample_rate=sample_rate)
-    # Convert Mel spectrogram to dB scale
-    mel_db = torchaudio.transforms.AmplitudeToDB()(mel_spectrogram)
-    # Calculate SPL
-    log_mel = 20 * torch.log10(mel_db + 1e-6)  # Adding a small value to avoid log(0)
-    spl = log_mel.mean(dim=-1)  # Average across frequency bins
-    return spl
-
-# label data
-def label_vt_f0_spl(wav_path, csv_dir, sample_rate=16000):
->>>>>>> 0cc1e3abf2db2d9401c7741cfbf0c3ba2af425e0
     """
     Label the vocal tract data with fundamental frequency (F0) and sound pressure level (SPL).
     
@@ -212,7 +139,6 @@ def label_vt_f0_spl(wav_path, csv_dir, sample_rate=16000):
     Returns:
     dict: Dictionary containing labeled data.
     """
-<<<<<<< HEAD
     file_name = os.path.basename(wav_path).replace('.wav', '.npz')
     audio_np, vt_image = load_audio_and_vt_data(wav_path = wav_path, sample_rate=sample_rate)
     f0 = estimate_fundamental_frequency(audio_np, sample_rate)
@@ -260,35 +186,6 @@ def pack_collate_fn(batch: list):
     return audio_packed, (vt_image_packed, f0_packed, spl_packed)
 
 
-=======
-    file_name = os.path.basename(wav_path).replace('.wav', '.csv')
-    audio_tensor, mat_data = load_audio_and_vt_data(wav_path = wav_path, sample_rate=sample_rate)
-    inner_tract = mat_data['inner_tract']
-    outer_tract = mat_data['outer_tract']
-    f0 = estimate_fundamental_frequency(audio_tensor, sample_rate)
-    spl = estimate_spectrogram_spl(audio_tensor, sample_rate)
-    if inner_tract.shape[0] < f0.shape[0]:
-        f0 = f0[:inner_tract.shape[0]]  # Truncate F0 to match inner_tract length
-    elif inner_tract.shape[0] > f0.shape[0]:
-        f0 = torch.cat((f0, torch.zeros(inner_tract.shape[0] - f0.shape[0])), dim=0)
-    if inner_tract.shape[0] < spl.shape[0]:
-        spl = spl[:inner_tract.shape[0]]  # Truncate SPL to match inner_tract length
-    elif inner_tract.shape[0] > spl.shape[0]:
-        spl = torch.cat((spl, torch.zeros(inner_tract.shape[0] - spl.shape[0])), dim=0)
-    
-    
-    csv_dict = {
-        'wav_path': wav_path,
-        'inner_tract': inner_tract,
-        'outer_tract': outer_tract,
-        'f0': f0,
-        'spl': spl
-    }
-    pd.DataFrame(csv_dict).to_csv(os.path.join(csv_dir, file_name), index=False)
-
-    return
-
->>>>>>> 0cc1e3abf2db2d9401c7741cfbf0c3ba2af425e0
 
 # Calculate vocal tract length
 def calculate_vt_dl(est_tensor):
@@ -316,7 +213,6 @@ def calculate_vt_dl(est_tensor):
 
 
 class AudioDataset(torch.utils.data.Dataset):
-<<<<<<< HEAD
     def __init__(self, data_dir:str, npz_dir:str , sample_rate=16000):
         super(AudioDataset, self).__init__()
         self.data_dir = data_dir
@@ -330,26 +226,10 @@ class AudioDataset(torch.utils.data.Dataset):
 
     def __len__(self):   
         return len(self.npz_path_list)
-=======
-    def __init__(self, data_dir:str, csv_dir:str , sample_rate=16000):
-        super(AudioDataset, self).__init__()
-        self.data_dir = data_dir
-        self.csv_dir = csv_dir
-        self.sample_rate = sample_rate
-        if not os.path.exists(self.csv_dir):
-            self.save_data_to_csv()
-        self.csv_path_list = self.load_csv_path()
-        if not self.csv_path_list:
-            raise ValueError("No CSV files found in the specified directory.")
-
-    def __len__(self):   
-        return len(self.csv_path_list)
->>>>>>> 0cc1e3abf2db2d9401c7741cfbf0c3ba2af425e0
 
     def __getitem__(self, idx):
         if idx >= len(self):
             raise IndexError("Index out of range for the dataset.")
-<<<<<<< HEAD
         npz_path = self.npz_path_list[idx]
         df = np.load(npz_path)  # Load the .npz file
         if df is None or len(df) == 0:
@@ -807,77 +687,6 @@ def total_loss_with_dynamic_weighting(est, target,
 
 
 """
-=======
-        csv_path = self.csv_path_list[idx]
-        df = pd.read_csv(csv_path)
-        if df.empty:
-            raise ValueError(f"CSV file at {csv_path} is empty.")
-        row = df.iloc[0]  # Assuming we want the first row of the CSV file
-        wav_file = row['wav_path']
-        if not os.path.exists(wav_file):
-            raise FileNotFoundError(f"WAV file not found at {wav_file}")
-        
-        # Load audio file
-        audio = torchaudio.load(wav_file)  # Load audio file
-        if audio.shape[0] > 1:
-            audio_tensor = audio.mean(dim=0, keepdim=True)  # Convert to mono if stereo
-        
-        # load labels
-        inner_tract = row['inner_tract']  # Assuming inner_tract is the label we want
-        outer_tract = row['outer_tract']
-        f0 = row['f0']  # Fundamental frequency
-        spl = row['spl']  # Sound pressure level
-        if isinstance(inner_tract, str):
-            inner_tract = np.fromstring(inner_tract[1:-1], sep=',')
-        if isinstance(outer_tract, str):
-            outer_tract = np.fromstring(outer_tract[1:-1], sep=',')
-        if isinstance(f0, str):
-            f0 = np.fromstring(f0[1:-1], sep=',')
-        if isinstance(spl, str):
-            spl = np.fromstring(spl[1:-1], sep=',')
-        inner_tract = torch.tensor(inner_tract, dtype=torch.float32)
-        outer_tract = torch.tensor(outer_tract, dtype=torch.float32)
-        f0 = torch.tensor(f0, dtype=torch.float32)
-        spl = torch.tensor(spl, dtype=torch.float32)
-
-        assert audio_tensor.shape[0] == 1, "Audio tensor should be mono."
-        assert audio_tensor.shape[1] > 0, "Audio tensor should not be empty."
-        assert inner_tract.ndim == 3, "Inner tract data should be 2-dimensional."
-        assert outer_tract.ndim == 3, "Outer tract data should be 2-dimensional."
-        assert f0.ndim == 1, "F0 data should be 1-dimensional."
-        assert spl.ndim == 1, "SPL data should be 1-dimensional."
-        assert inner_tract.shape[0] == outer_tract.shape[0], "Inner and outer tract data should have the same number of frames."
-        assert inner_tract.shape[0] == f0.shape[0], "Inner tract and F0 data should have the same number of frames."
-        assert inner_tract.shape[0] == spl.shape[0], "Inner tract and SPL data should have the same number of frames."
-
-        return audio_tensor, (inner_tract, outer_tract, f0, spl)  # Return audio tensor and labels as a tuple
-    
-    def load_csv_path(self):
-        if not os.path.exists(self.csv_dir):
-            raise FileNotFoundError(f"CSV file not found at {self.csv_dir}")
-        csv_path_list = [os.path.join(self.csv_dir, file) for file in os.listdir(self.csv_dir) if file.endswith('.csv')]
-        return csv_path_list
-    
-    def save_data_to_csv(self):
-        """        Save audio and vocal tract data to CSV files.
-        """
-        if not os.path.exists(self.csv_dir):
-            os.makedirs(self.csv_dir)
-        for file in os.listdir(self.data_dir):
-            if file.endswith('.wav'):
-                wav_path = os.path.join(self.wav_dir, file)
-                # Load audio and vocal tract data
-                label_vt_f0_spl(wav_path, self.csv_dir, sample_rate=self.sample_rate)
-        print(f"Data saved to CSV files in {self.csv_dir}")
-        return
-    
-
-
-
-
-
-
->>>>>>> 0cc1e3abf2db2d9401c7741cfbf0c3ba2af425e0
 # 데이터셋 열람
 path = '/Volumes/One_Touch/rtMRI_Dataset/VOCOLAB/Singer5/out/morph'
 mat = scipy.io.loadmat(os.path.join(path,'Singer5_segment_001_morph.mat'))
@@ -921,11 +730,7 @@ plt.ylabel('Y-axis')
 plt.title('Plot of pts_lb_c')
 plt.gca().invert_yaxis()  # y축 반전
 plt.show()
-<<<<<<< HEAD
 """
-=======
-
->>>>>>> 0cc1e3abf2db2d9401c7741cfbf0c3ba2af425e0
 
 
 
