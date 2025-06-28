@@ -8,10 +8,13 @@ torch
 torchaudio
 transformers
 
+<<<<<<< HEAD
 matplotlib
 IPython
 pandas
 
+=======
+>>>>>>> 0cc1e3abf2db2d9401c7741cfbf0c3ba2af425e0
 
 # 유틸리티
 python-dotenv
